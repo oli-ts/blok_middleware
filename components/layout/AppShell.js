@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Image from "next/image";
 import { Bell, Search } from "lucide-react";
 import { createSupabaseServerClient } from "../../lib/supabase/server";
 import { Button } from "../ui/Button";
@@ -45,12 +46,15 @@ export async function AppShell({ children }) {
       </a>
 
       <aside className="fixed left-0 top-0 z-40 hidden h-screen w-[240px] flex-col bg-gray-800 px-4 py-5 text-white md:flex">
-        <div className="mb-8 flex items-center gap-3 px-2">
-          
-          <div>
-            <div className="text-lg font-semibold leading-tight">Blok Facilities</div>
-            <div className="text-xs text-gray-400">Lead Middleware</div>
-          </div>
+        <div className="mb-8 flex items-center px-2">
+          <Image
+            src="/Frame%206.svg"
+            alt="Blok Facilities"
+            width={180}
+            height={44}
+            priority
+            className="h-8 w-auto max-w-[180px]"
+          />
         </div>
 
         <SidebarNav role={role} />
