@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { ActivitySquare, Home, Layers, Settings, Users } from "lucide-react";
+import { ActivitySquare, Building2, Home, Layers, Settings, Users } from "lucide-react";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
   { href: "/projects", label: "Projects", icon: Layers },
   { href: "/contacts", label: "Contacts", icon: Users },
+  { href: "/companies", label: "Companies", icon: Building2 },
   { href: "/crm/push", label: "CRM Push", icon: ActivitySquare },
   { href: "/admin", label: "Admin", icon: Settings, adminOnly: true },
 ];

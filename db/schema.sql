@@ -139,11 +139,23 @@ create table if not exists public.companies (
   sector text,
   website text,
   crm_org_id text,
+  external_company_id text,
+  source_system text,
+  source_ref text,
+  source_payload jsonb,
+  source_last_seen_at timestamptz,
+  description text,
+  phone text,
+  employee_count integer,
+  headquarters_address text,
   created_at timestamptz default now(),
   updated_at timestamptz default now(),
   deleted_at timestamptz
 );
 create index if not exists companies_name_idx on public.companies using gin (to_tsvector('english', name));
+create unique index if not exists companies_source_system_ref_unique_idx
+  on public.companies(source_system, source_ref)
+  where source_system is not null and source_ref is not null;
 
 create table if not exists public.offices (
   id uuid primary key default gen_random_uuid(),
@@ -152,10 +164,18 @@ create table if not exists public.offices (
   address text,
   region text,
   phone text,
+  external_office_id text,
+  source_system text,
+  source_ref text,
+  source_payload jsonb,
+  source_last_seen_at timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
 create index if not exists offices_company_idx on public.offices(company_id);
+create unique index if not exists offices_source_system_ref_unique_idx
+  on public.offices(source_system, source_ref)
+  where source_system is not null and source_ref is not null;
 
 -- projects
 create table if not exists public.projects (

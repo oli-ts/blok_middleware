@@ -30,7 +30,7 @@ export async function GET() {
       .order("priority", { ascending: true }),
     supabase
       .from("contact_acquisition_runs")
-      .select("id, status, started_at, completed_at, contacts_seen, contacts_created, contacts_updated, contacts_skipped, error_message")
+      .select("id, status, started_at, completed_at, contacts_seen, contacts_created, contacts_updated, contacts_skipped, error_message, details")
       .order("created_at", { ascending: false })
       .limit(5),
   ]);

@@ -9,15 +9,22 @@ function formatPayload(payload) {
   return JSON.stringify(payload, null, 2);
 }
 
-export function SourcePayloadModal({ payload, source = "Source" }) {
+export function SourcePayloadModal({ payload, source = "Source", buttonLabel = "View raw response", className = "" }) {
   const [open, setOpen] = useState(false);
   const formattedPayload = useMemo(() => formatPayload(payload), [payload]);
   const hasPayload = Boolean(payload);
 
   return (
     <>
-      <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(true)} disabled={!hasPayload}>
-        View raw response
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        className={className}
+        onClick={() => setOpen(true)}
+        disabled={!hasPayload}
+      >
+        {buttonLabel}
       </Button>
 
       {open ? (

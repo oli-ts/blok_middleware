@@ -1,53 +1,59 @@
-import { fetchCompanySummary } from "../../../lib/queries";
-import { Card, CardBody, CardHeader } from "../../../components/ui/Card";
-import { SimpleTable } from "../../../components/ui/SimpleTable";
-import { Badge } from "../../../components/ui/Badge";
-import { Button } from "../../../components/ui/Button";
+import { fetchCompanyMetrics, fetchCompanySummaryPage } from "../../../lib/queries";
+import { createSupabaseServerClient } from "../../../lib/supabase/server";
+import { CompaniesWorkspace } from "../../../components/companies/CompaniesWorkspace";
 
-export default async function CompaniesPage() {
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 250];
+
+function parsePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export default async function CompaniesPage({ searchParams }) {
+  const params = await searchParams;
+  const page = parsePositiveInteger(params?.page, 1);
+  const requestedPageSize = parsePositiveInteger(params?.pageSize, 25);
+  const pageSize = PAGE_SIZE_OPTIONS.includes(requestedPageSize) ? requestedPageSize : 25;
   let companies = [];
+  let isAdmin = false;
+  let pagination = {
+    page,
+    pageSize,
+    totalCount: 0,
+  };
+  let metrics = {
+    total: 0,
+    enriched: 0,
+    basic: 0,
+    linked: 0,
+  };
+
   try {
-    companies = await fetchCompanySummary();
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const { data: profile } = user
+      ? await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle()
+      : { data: null };
+
+    const [companyPage, companyMetrics] = await Promise.all([
+      fetchCompanySummaryPage({ page, pageSize }),
+      fetchCompanyMetrics(),
+    ]);
+
+    companies = companyPage.companies;
+    pagination = {
+      page: companyPage.page,
+      pageSize: companyPage.pageSize,
+      totalCount: companyPage.totalCount,
+    };
+    metrics = companyMetrics;
+    isAdmin = profile?.role === "admin";
   } catch (error) {
     companies = [];
+    isAdmin = false;
   }
 
-  const columns = [
-    { header: "Company", accessor: "name" },
-    { header: "Sector", accessor: "sector" },
-    { header: "Contacts", accessor: "contact_count" },
-    { header: "Projects", accessor: "project_count" },
-    {
-      header: "CRM",
-      accessor: "crm_org_id",
-      cell: (row) =>
-        row.crm_org_id ? <Badge tone="success">Linked</Badge> : <Badge tone="warning">Not linked</Badge>,
-    },
-    {
-      header: "Actions",
-      accessor: "actions",
-      cell: (row) => (
-        <div className="flex gap-2">
-          <Button variant="ghost" size="sm">Review</Button>
-          <Button variant="ghost" size="sm">Push</Button>
-        </div>
-      ),
-    },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <p className="text-xs uppercase tracking-wide text-neutral-500">Grouping</p>
-        <h1 className="text-2xl font-semibold text-neutral-900">Companies & Offices</h1>
-        <p className="text-sm text-neutral-600">Batch review contacts at company level.</p>
-      </div>
-      <Card>
-        <CardHeader title="Company groups" />
-        <CardBody>
-          <SimpleTable columns={columns} data={companies} />
-        </CardBody>
-      </Card>
-    </div>
-  );
+  return <CompaniesWorkspace companies={companies} isAdmin={isAdmin} pagination={pagination} metrics={metrics} />;
 }
