@@ -32,6 +32,12 @@ const IMPORT_FIELD_LABELS = [
   ["source", "Source"],
 ];
 const CONTACT_PAGE_SIZE_OPTIONS = [25, 50, 100, 250];
+const CRM_PUSH_FEEDBACK_STYLES = {
+  success: "border-green-700 bg-green-500/50 text-green-950",
+  warning: "border-amber-700 bg-amber-500/50 text-amber-950",
+  error: "border-red-700 bg-red-500/50 text-red-950",
+  info: "border-blue-700 bg-blue-500/50 text-blue-950",
+};
 
 function ContactMetric({ label, value, detail }) {
   return (
@@ -883,20 +889,101 @@ function ContactAcquisitionModal({ open, onClose, onImported }) {
   );
 }
 
-export function ContactsWorkspace({ contacts, isAdmin = false, pagination, metrics }) {
+function CrmPushConfirmationModal({ open, contacts, status, onCancel, onProceed }) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-lg bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-neutral-200 px-5 py-4">
+          <div>
+            <div className="text-xs uppercase tracking-wide text-neutral-500">CRM push</div>
+            <h2 className="text-lg font-semibold text-neutral-950">Confirm push to Pipedrive</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={status === "pushing"}
+            className="rounded-md p-2 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="max-h-[calc(90vh-148px)] space-y-4 overflow-auto px-5 py-4">
+          <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700">
+            <div className="font-medium text-neutral-950">
+              {contacts.length} contact{contacts.length === 1 ? "" : "s"} selected
+            </div>
+            <p className="mt-1">
+              Proceeding will search or create the person, then search or create the company, then create the lead in
+              Pipedrive.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            {contacts.map((contact) => {
+              const primaryPhone = getPhoneNumbers(contact)[0];
+
+              return (
+                <div key={contact.id} className="rounded-lg border border-neutral-200 p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="font-medium text-neutral-950">{getContactName(contact)}</div>
+                      <div className="mt-1 text-sm text-neutral-600">
+                        {contact.job_title || "No role"}
+                        {contact.company ? ` - ${contact.company}` : ""}
+                      </div>
+                      <div className="mt-1 text-xs text-neutral-500">
+                        {contact.email || "No email"}
+                        {primaryPhone ? ` - ${primaryPhone}` : ""}
+                      </div>
+                    </div>
+                    <Badge tone={contact.crm_sync_status === "pushed" ? "success" : "warning"}>
+                      {contact.crm_sync_status}
+                    </Badge>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-neutral-200 px-5 py-4">
+          <Button type="button" variant="secondary" onClick={onCancel} disabled={status === "pushing"}>
+            Cancel
+          </Button>
+          <Button type="button" onClick={onProceed} disabled={status === "pushing"}>
+            {status === "pushing" ? "Pushing..." : "Proceed"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function ContactsWorkspace({ contacts, isAdmin = false, pagination, metrics, sources = [] }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [search, setSearch] = useState(pagination?.search || "");
+  const [sortOrder, setSortOrder] = useState("name_asc");
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [acquisitionOpen, setAcquisitionOpen] = useState(false);
+  const [crmPushConfirmOpen, setCrmPushConfirmOpen] = useState(false);
   const [selectedContactIds, setSelectedContactIds] = useState([]);
   const [crmPushStatus, setCrmPushStatus] = useState("idle");
   const [crmPushMessage, setCrmPushMessage] = useState("");
+  const [crmPushFeedbackTone, setCrmPushFeedbackTone] = useState("info");
+  const [crmPushFailures, setCrmPushFailures] = useState([]);
   const currentPage = Math.max(1, Number(pagination?.page) || 1);
   const pageSize = CONTACT_PAGE_SIZE_OPTIONS.includes(Number(pagination?.pageSize))
     ? Number(pagination.pageSize)
     : 25;
+  const currentSource = String(pagination?.source || "").trim();
+  const currentHasPhone = Boolean(pagination?.hasPhone);
+  const currentHasLinkedin = Boolean(pagination?.hasLinkedin);
   const totalCount = Number(pagination?.totalCount) || 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const safePage = Math.min(currentPage, totalPages);
@@ -914,6 +1001,9 @@ export function ContactsWorkspace({ contacts, isAdmin = false, pagination, metri
       const nextPage = patch.page ?? currentPage;
       const nextPageSize = patch.pageSize ?? pageSize;
       const nextSearch = patch.q ?? search;
+      const nextSource = patch.source ?? currentSource;
+      const nextHasPhone = patch.hasPhone ?? currentHasPhone;
+      const nextHasLinkedin = patch.hasLinkedin ?? currentHasLinkedin;
 
       if (nextPage > 1) params.set("page", String(nextPage));
       else params.delete("page");
@@ -924,10 +1014,19 @@ export function ContactsWorkspace({ contacts, isAdmin = false, pagination, metri
       if (String(nextSearch || "").trim()) params.set("q", String(nextSearch).trim());
       else params.delete("q");
 
+      if (String(nextSource || "").trim()) params.set("source", String(nextSource).trim());
+      else params.delete("source");
+
+      if (nextHasPhone) params.set("hasPhone", "1");
+      else params.delete("hasPhone");
+
+      if (nextHasLinkedin) params.set("hasLinkedin", "1");
+      else params.delete("hasLinkedin");
+
       const queryString = params.toString();
       router.push(queryString ? `${pathname}?${queryString}` : pathname);
     },
-    [currentPage, pageSize, pathname, router, search, searchParams]
+    [currentPage, currentHasLinkedin, currentHasPhone, currentSource, pageSize, pathname, router, search, searchParams]
   );
 
   useEffect(() => {
@@ -949,9 +1048,42 @@ export function ContactsWorkspace({ contacts, isAdmin = false, pagination, metri
     return () => clearTimeout(timeout);
   }, [pagination?.search, search, updateContactsUrl]);
 
+  useEffect(() => {
+    setSortOrder("name_asc");
+  }, [pagination?.page, pagination?.pageSize, pagination?.search, pagination?.source, pagination?.hasPhone, pagination?.hasLinkedin]);
+
   const selectedContactIdSet = useMemo(() => new Set(selectedContactIds), [selectedContactIds]);
+  const displayedContacts = useMemo(() => {
+    const rows = [...contacts];
+
+    if (sortOrder === "recent_desc") {
+      rows.sort((left, right) => {
+        const leftDate = left?.created_at ? new Date(left.created_at).getTime() : 0;
+        const rightDate = right?.created_at ? new Date(right.created_at).getTime() : 0;
+        if (leftDate !== rightDate) return rightDate - leftDate;
+        return getContactName(left).localeCompare(getContactName(right));
+      });
+      return rows;
+    }
+
+    if (sortOrder === "source_asc") {
+      rows.sort((left, right) => {
+        const sourceCompare = String(left?.source || "").localeCompare(String(right?.source || ""));
+        if (sourceCompare !== 0) return sourceCompare;
+        return getContactName(left).localeCompare(getContactName(right));
+      });
+      return rows;
+    }
+
+    rows.sort((left, right) => getContactName(left).localeCompare(getContactName(right)));
+    return rows;
+  }, [contacts, sortOrder]);
+  const selectedContacts = useMemo(
+    () => contacts.filter((contact) => selectedContactIdSet.has(contact.id)),
+    [contacts, selectedContactIdSet]
+  );
   const allVisibleSelected =
-    contacts.length > 0 && contacts.every((contact) => selectedContactIdSet.has(contact.id));
+    displayedContacts.length > 0 && displayedContacts.every((contact) => selectedContactIdSet.has(contact.id));
 
   function toggleContactSelection(contactId) {
     setSelectedContactIds((current) =>
@@ -963,13 +1095,13 @@ export function ContactsWorkspace({ contacts, isAdmin = false, pagination, metri
 
   function toggleVisibleSelection() {
     if (allVisibleSelected) {
-      const visibleIds = new Set(contacts.map((contact) => contact.id));
+      const visibleIds = new Set(displayedContacts.map((contact) => contact.id));
       setSelectedContactIds((current) => current.filter((id) => !visibleIds.has(id)));
       return;
     }
 
     setSelectedContactIds((current) =>
-      Array.from(new Set([...current, ...contacts.map((contact) => contact.id)]))
+      Array.from(new Set([...current, ...displayedContacts.map((contact) => contact.id)]))
     );
   }
 
@@ -977,11 +1109,14 @@ export function ContactsWorkspace({ contacts, isAdmin = false, pagination, metri
     const ids = Array.from(new Set(contactIds.filter(Boolean)));
     if (ids.length === 0) {
       setCrmPushMessage("Select at least one contact to push.");
+      setCrmPushFeedbackTone("warning");
+      setCrmPushFailures([]);
       return;
     }
 
     setCrmPushStatus("pushing");
     setCrmPushMessage("");
+    setCrmPushFailures([]);
 
     const response = await fetch("/api/admin/crm/push", {
       method: "POST",
@@ -992,15 +1127,57 @@ export function ContactsWorkspace({ contacts, isAdmin = false, pagination, metri
 
     if (!response.ok) {
       setCrmPushStatus("idle");
-      setCrmPushMessage(payload.error || "Unable to queue CRM push.");
+      setCrmPushMessage(payload.error || "Unable to push contacts to CRM.");
+      setCrmPushFeedbackTone("error");
+      setCrmPushFailures(
+        Array.isArray(payload.result?.failures)
+          ? payload.result.failures
+          : payload.error
+            ? [{ contact_name: "CRM push", error: payload.error }]
+            : []
+      );
       return;
     }
 
     setCrmPushStatus("idle");
+    setCrmPushConfirmOpen(false);
     setSelectedContactIds([]);
-    setCrmPushMessage(`Queued ${payload.result.queued} contact${payload.result.queued === 1 ? "" : "s"} for CRM push.`);
+    setCrmPushFailures(Array.isArray(payload.result?.failures) ? payload.result.failures : []);
+    setCrmPushFeedbackTone(
+      payload.result?.failed > 0 ? "warning" : payload.result?.pushed > 0 ? "success" : "info"
+    );
+    setCrmPushMessage(
+      payload.result?.summary ||
+        `Synced ${payload.result?.pushed || 0} contact${payload.result?.pushed === 1 ? "" : "s"} to Pipedrive.`
+    );
     router.refresh();
   }
+
+  function openCrmPushConfirm(contactIds) {
+    const ids = Array.from(new Set(contactIds.filter(Boolean)));
+    if (ids.length === 0) {
+      setCrmPushMessage("Select at least one contact to push.");
+      setCrmPushFeedbackTone("warning");
+      setCrmPushFailures([]);
+      return;
+    }
+
+    setSelectedContactIds(ids);
+    setCrmPushConfirmOpen(true);
+  }
+
+  function clearContactFilters() {
+    setSortOrder("name_asc");
+    updateContactsUrl({
+      page: 1,
+      source: "",
+      hasPhone: false,
+      hasLinkedin: false,
+      q: "",
+    });
+  }
+
+  const hasActiveFilters = Boolean(search.trim() || currentSource || currentHasPhone || currentHasLinkedin);
 
   return (
     <div className="space-y-6">
@@ -1042,10 +1219,10 @@ export function ContactsWorkspace({ contacts, isAdmin = false, pagination, metri
                 <Button
                   type="button"
                   size="sm"
-                  onClick={() => pushContactsToCrm(selectedContactIds)}
+                  onClick={() => openCrmPushConfirm(selectedContactIds)}
                   disabled={crmPushStatus === "pushing"}
                 >
-                  {crmPushStatus === "pushing" ? "Queuing..." : `Push selected to CRM (${selectedContactIds.length})`}
+                  {crmPushStatus === "pushing" ? "Pushing..." : `Push selected to CRM (${selectedContactIds.length})`}
                 </Button>
               ) : null}
               <input
@@ -1057,9 +1234,85 @@ export function ContactsWorkspace({ contacts, isAdmin = false, pagination, metri
             </div>
           </div>
 
+          <div className="flex flex-col gap-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3 md:flex-row md:flex-wrap md:items-end">
+            <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm md:min-w-44 md:flex-none">
+              <span className="font-medium text-neutral-700">Sort</span>
+              <select
+                value={sortOrder}
+                onChange={(event) => setSortOrder(event.target.value)}
+                className="rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm focus:border-black focus:outline-none"
+              >
+                <option value="name_asc">Name</option>
+                <option value="recent_desc">Most recently added</option>
+                <option value="source_asc">Source</option>
+              </select>
+            </label>
+
+            <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm md:min-w-44 md:flex-none">
+              <span className="font-medium text-neutral-700">Source</span>
+              <select
+                value={currentSource}
+                onChange={(event) => updateContactsUrl({ page: 1, source: event.target.value })}
+                className="rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm focus:border-black focus:outline-none"
+              >
+                <option value="">All sources</option>
+                {sources.map((source) => (
+                  <option key={source} value={source}>
+                    {source}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex items-center gap-2 rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700">
+              <input
+                type="checkbox"
+                checked={currentHasPhone}
+                onChange={(event) => updateContactsUrl({ page: 1, hasPhone: event.target.checked })}
+                className="h-4 w-4"
+              />
+              Has phone number
+            </label>
+
+            <label className="flex items-center gap-2 rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700">
+              <input
+                type="checkbox"
+                checked={currentHasLinkedin}
+                onChange={(event) => updateContactsUrl({ page: 1, hasLinkedin: event.target.checked })}
+                className="h-4 w-4"
+              />
+              Has LinkedIn
+            </label>
+
+            {hasActiveFilters ? (
+              <Button type="button" variant="secondary" size="sm" onClick={clearContactFilters}>
+                Clear filters
+              </Button>
+            ) : null}
+          </div>
+
           {crmPushMessage ? (
-            <div className="rounded-md bg-neutral-100 px-3 py-2 text-sm text-neutral-700">
-              {crmPushMessage}
+            <div
+              className={`rounded-md border px-3 py-3 text-sm ${CRM_PUSH_FEEDBACK_STYLES[crmPushFeedbackTone] || CRM_PUSH_FEEDBACK_STYLES.info}`}
+            >
+              <div className="font-medium">{crmPushMessage}</div>
+              {crmPushFailures.length > 0 ? (
+                <details className="mt-3 rounded-md border border-current/15 bg-white/60 px-3 py-2">
+                  <summary className="cursor-pointer select-none text-sm font-medium">
+                    View errors ({crmPushFailures.length})
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    {crmPushFailures.map((failure, index) => (
+                      <div key={`${failure.contact_id || failure.contact_name || "failure"}-${index}`} className="rounded-md border border-current/15 bg-white px-3 py-2">
+                        <div className="font-medium text-neutral-950">
+                          {failure.contact_name || failure.contact_id || "Push error"}
+                        </div>
+                        <div className="mt-1 text-sm text-neutral-700">{failure.error || "Unknown error"}</div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
             </div>
           ) : null}
 
@@ -1084,7 +1337,7 @@ export function ContactsWorkspace({ contacts, isAdmin = false, pagination, metri
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-200 bg-white text-sm">
-                {contacts.map((contact) => (
+                {displayedContacts.map((contact) => (
                   <tr key={contact.id} className="hover:bg-neutral-50">
                     <td className="px-3 py-3">
                       <input
@@ -1156,7 +1409,7 @@ export function ContactsWorkspace({ contacts, isAdmin = false, pagination, metri
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => pushContactsToCrm([contact.id])}
+                            onClick={() => openCrmPushConfirm([contact.id])}
                             disabled={crmPushStatus === "pushing"}
                           >
                             Push to CRM
@@ -1201,6 +1454,15 @@ export function ContactsWorkspace({ contacts, isAdmin = false, pagination, metri
                 type="button"
                 variant="secondary"
                 size="sm"
+                onClick={() => updateContactsUrl({ page: 1 })}
+                disabled={safePage <= 1}
+              >
+                First
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
                 onClick={() => updateContactsUrl({ page: Math.max(1, safePage - 1) })}
                 disabled={safePage <= 1}
               >
@@ -1218,10 +1480,27 @@ export function ContactsWorkspace({ contacts, isAdmin = false, pagination, metri
               >
                 Next <ChevronRight size={16} />
               </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => updateContactsUrl({ page: totalPages })}
+                disabled={safePage >= totalPages}
+              >
+                Last
+              </Button>
             </div>
           </div>
         </CardBody>
       </Card>
+
+      <CrmPushConfirmationModal
+        open={crmPushConfirmOpen}
+        contacts={selectedContacts}
+        status={crmPushStatus}
+        onCancel={() => setCrmPushConfirmOpen(false)}
+        onProceed={() => pushContactsToCrm(selectedContactIds)}
+      />
 
       {isAdmin ? (
         <>

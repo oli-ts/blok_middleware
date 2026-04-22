@@ -29,6 +29,7 @@ select c.id,
        c.last_name,
        c.job_title,
        c.email,
+       c.created_at,
        c.phone,
        c.phone_numbers,
        c.linkedin_url,
@@ -53,7 +54,7 @@ left join public.offices o on o.id = c.office_id
 left join public.project_contacts pc on pc.contact_id = c.id
 left join public.projects p on p.id = pc.project_id
 where c.deleted_at is null
-group by c.id, co.name, o.name;
+group by c.id, c.created_at, co.name, o.name;
 
 drop view if exists public.vw_company_contact_summary;
 create view public.vw_company_contact_summary as
